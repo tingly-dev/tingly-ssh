@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/0x0079/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
 )
 
 // maxBatchBytes caps how much stream data one writer pass emits before it

@@ -1,4 +1,4 @@
-module github.com/0x0079/tingly-ssh
+module github.com/tingly-dev/tingly-ssh
 
 go 1.26.0
 

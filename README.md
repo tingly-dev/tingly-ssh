@@ -7,8 +7,8 @@ Switch from Wi-Fi to 5G, close the lid, ride through a tunnel. The same `ssh` se
 
 English | [简体中文](README.zh-CN.md) · [Website](https://0x0079.github.io/tingly-ssh/)
 
-[![CI](https://github.com/0x0079/tingly-ssh/actions/workflows/ci.yml/badge.svg)](https://github.com/0x0079/tingly-ssh/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/0x0079/tingly-ssh)](https://github.com/0x0079/tingly-ssh/releases)
+[![CI](https://github.com/tingly-dev/tingly-ssh/actions/workflows/ci.yml/badge.svg)](https://github.com/tingly-dev/tingly-ssh/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/0x0079/tingly-ssh)](https://github.com/tingly-dev/tingly-ssh/releases)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 
 <img src="docs/assets/demo.gif" alt="A long job's progress bar over two ssh sessions: plain ssh freezes at 15% and times out when the laptop's IP changes; through tingly-ssh the bar survives the IP change and a 15-second outage and runs to 100%" width="820">
@@ -45,17 +45,17 @@ resumable session layer, so a changed address or a short outage is something it 
 
 ## How it compares
 
-|  | **tingly-ssh** | mosh | Eternal Terminal | autossh | tmux / screen alone |
-| --- | --- | --- | --- | --- | --- |
-| Survives an IP change | ✅ | ✅ | ✅ | ❌ reconnects as a new session | ❌ you reattach by hand |
-| Survives a short outage | ✅ default 60 s, configurable | ✅ | ✅ | ❌ new session | ❌ you reattach by hand |
-| Delivers **every byte** of output | ✅ | ❌ syncs the latest screen only | ✅ | ❌ | ✅ in the pane, not the connection |
-| `scp`, `sftp`, `rsync`, `git` over SSH | ✅ | ❌ terminal only | ❌ terminal and tunnels | ✅ | ✅ |
-| `-L` / `-R` / `-D` forwarding, agent forwarding | ✅ | ❌ | partial | ✅ | ✅ |
-| Your scrollback works | ✅ | ❌ | ✅ | ✅ | ✅ |
-| sshd unchanged, SSH auth and crypto unchanged | ✅ | ✅ uses ssh to bootstrap | ✅ | ✅ | ✅ |
-| Server side | one daemon, one UDP port | `mosh-server`, UDP 60000–61000 | `etserver` daemon | nothing | nothing |
-| Typing prediction on slow links | ❌ | ✅ | ❌ | ❌ | ❌ |
+|                                                 | **tingly-ssh**               | mosh                           | Eternal Terminal       | autossh                       | tmux / screen alone               |
+| ----------------------------------------------- | ---------------------------- | ------------------------------ | ---------------------- | ----------------------------- | --------------------------------- |
+| Survives an IP change                           | ✅                            | ✅                              | ✅                      | ❌ reconnects as a new session | ❌ you reattach by hand            |
+| Survives a short outage                         | ✅ default 60 s, configurable | ✅                              | ✅                      | ❌ new session                 | ❌ you reattach by hand            |
+| Delivers **every byte** of output               | ✅                            | ❌ syncs the latest screen only | ✅                      | ❌                             | ✅ in the pane, not the connection |
+| `scp`, `sftp`, `rsync`, `git` over SSH          | ✅                            | ❌ terminal only                | ❌ terminal and tunnels | ✅                             | ✅                                 |
+| `-L` / `-R` / `-D` forwarding, agent forwarding | ✅                            | ❌                              | partial                | ✅                             | ✅                                 |
+| Your scrollback works                           | ✅                            | ❌                              | ✅                      | ✅                             | ✅                                 |
+| sshd unchanged, SSH auth and crypto unchanged   | ✅                            | ✅ uses ssh to bootstrap        | ✅                      | ✅                             | ✅                                 |
+| Server side                                     | one daemon, one UDP port     | `mosh-server`, UDP 60000–61000 | `etserver` daemon      | nothing                       | nothing                           |
+| Typing prediction on slow links                 | ❌                            | ✅                              | ❌                      | ❌                             | ❌                                 |
 
 tingly-ssh and tmux do different jobs and work well together: the tunnel keeps the **connection** alive
 across network changes, tmux keeps the **work** alive if the connection does die (for example when the laptop is off for an hour).
@@ -66,17 +66,17 @@ About five minutes. You need a Linux or macOS client, a Linux or macOS server ru
 
 ### 1. Install on both machines
 
-Prebuilt binaries for linux/darwin × amd64/arm64 are attached to every [release](https://github.com/0x0079/tingly-ssh/releases):
+Prebuilt binaries for linux/darwin × amd64/arm64 are attached to every [release](https://github.com/tingly-dev/tingly-ssh/releases):
 
 ```bash
 # Replace VERSION, OS (linux|darwin) and ARCH (amd64|arm64)
-curl -LO https://github.com/0x0079/tingly-ssh/releases/download/vVERSION/tingly-ssh_VERSION_OS_ARCH.tar.gz
+curl -LO https://github.com/tingly-dev/tingly-ssh/releases/download/vVERSION/tingly-ssh_VERSION_OS_ARCH.tar.gz
 tar xzf tingly-ssh_VERSION_OS_ARCH.tar.gz
 sudo install -m 755 tingly-ssh /usr/local/bin/
 tingly-ssh version
 ```
 
-Or with Go 1.26+: `go install github.com/0x0079/tingly-ssh/cmd/tingly-ssh@latest`.
+Or with Go 1.26+: `go install github.com/tingly-dev/tingly-ssh/cmd/tingly-ssh@latest`.
 
 ### 2. Server: run it next to sshd
 
@@ -190,12 +190,12 @@ ssh -p 2222 alice@127.0.0.1
 <details>
 <summary><b>Tuning</b></summary>
 
-| Flag | Where | What it controls |
-| --- | --- | --- |
-| `--session-linger` | client and server | how long an outage stays recoverable (default 60s) |
-| `--idle-timeout`, `--keepalive` | client | how fast a dead link is noticed; laptops do well with `8s` / `2s` |
-| `--window` | both | per-stream window, which also bounds replay memory |
-| `--max-sessions` | server | bounds server memory. The server prints the worst case at startup, so size it for your real concurrency |
+| Flag                            | Where             | What it controls                                                                                        |
+| ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `--session-linger`              | client and server | how long an outage stays recoverable (default 60s)                                                      |
+| `--idle-timeout`, `--keepalive` | client            | how fast a dead link is noticed; laptops do well with `8s` / `2s`                                       |
+| `--window`                      | both              | per-stream window, which also bounds replay memory                                                      |
+| `--max-sessions`                | server            | bounds server memory. The server prints the worst case at startup, so size it for your real concurrency |
 
 `kill -USR1` on a client or proxy forces an immediate reconnect, which is handy in a network-change hook.
 </details>

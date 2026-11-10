@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0x0079/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
 )
 
 // PinPrefix marks a SPKI pin string.

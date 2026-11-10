@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/0x0079/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
 )
 
 // SigNamespace scopes every signature this project asks an SSH key for. It

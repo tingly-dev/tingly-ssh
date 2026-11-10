@@ -12,7 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"github.com/0x0079/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
 )
 
 // Prover signs a HELLO's binding message with the user's existing SSH keys.

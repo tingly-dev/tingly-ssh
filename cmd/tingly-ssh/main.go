@@ -21,10 +21,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/0x0079/tingly-ssh/internal/auth"
-	"github.com/0x0079/tingly-ssh/internal/bridge"
-	"github.com/0x0079/tingly-ssh/internal/proto"
-	"github.com/0x0079/tingly-ssh/internal/transport"
+	"github.com/tingly-dev/tingly-ssh/internal/auth"
+	"github.com/tingly-dev/tingly-ssh/internal/bridge"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/transport"
 )
 
 const usage = `tingly-ssh - SSH over QUIC with session resumption

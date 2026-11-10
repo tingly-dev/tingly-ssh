@@ -7,8 +7,8 @@ Wi-Fi 切 5G、合上盖子、地铁进隧道，还是原来那条 `ssh` 会话�
 
 [English](README.md) | 简体中文 · [项目主页](https://0x0079.github.io/tingly-ssh/)
 
-[![CI](https://github.com/0x0079/tingly-ssh/actions/workflows/ci.yml/badge.svg)](https://github.com/0x0079/tingly-ssh/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/0x0079/tingly-ssh)](https://github.com/0x0079/tingly-ssh/releases)
+[![CI](https://github.com/tingly-dev/tingly-ssh/actions/workflows/ci.yml/badge.svg)](https://github.com/tingly-dev/tingly-ssh/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/0x0079/tingly-ssh)](https://github.com/tingly-dev/tingly-ssh/releases)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 
 <img src="docs/assets/demo.gif" alt="两条 ssh 上跑同一个长任务：笔记本 IP 一变，普通 ssh 的进度条停在 15% 然后超时；走 tingly-ssh 的进度条扛过 IP 变化和 15 秒断网，一直跑到 100%" width="820">
@@ -44,17 +44,17 @@ Wi-Fi 切 5G、合上盖子、地铁进隧道，还是原来那条 `ssh` 会话�
 
 ## 和其他方案比
 
-|  | **tingly-ssh** | mosh | Eternal Terminal | autossh | 只用 tmux / screen |
-| --- | --- | --- | --- | --- | --- |
-| IP 变了还能用 | ✅ | ✅ | ✅ | ❌ 重连成新会话 | ❌ 需要手动 reattach |
-| 短时断网能恢复 | ✅ 默认 60 秒，可调 | ✅ | ✅ | ❌ 新会话 | ❌ 需要手动 reattach |
-| 输出**逐字节**送达 | ✅ | ❌ 只同步最新一屏 | ✅ | ❌ | ✅ 在 pane 里，连接本身不行 |
-| `scp`、`sftp`、`rsync`、SSH 上的 `git` | ✅ | ❌ 只有终端 | ❌ 终端和隧道 | ✅ | ✅ |
-| `-L` / `-R` / `-D` 转发、agent 转发 | ✅ | ❌ | 部分 | ✅ | ✅ |
-| 终端回滚（scrollback）正常 | ✅ | ❌ | ✅ | ✅ | ✅ |
-| sshd 不改，SSH 认证与加密不变 | ✅ | ✅ 用 ssh 引导 | ✅ | ✅ | ✅ |
-| 服务端需要 | 一个进程，一个 UDP 端口 | `mosh-server`，UDP 60000–61000 | `etserver` 守护进程 | 无 | 无 |
-| 慢链路上的输入预测 | ❌ | ✅ | ❌ | ❌ | ❌ |
+|                                        | **tingly-ssh**          | mosh                           | Eternal Terminal    | autossh        | 只用 tmux / screen         |
+| -------------------------------------- | ----------------------- | ------------------------------ | ------------------- | -------------- | -------------------------- |
+| IP 变了还能用                          | ✅                       | ✅                              | ✅                   | ❌ 重连成新会话 | ❌ 需要手动 reattach        |
+| 短时断网能恢复                         | ✅ 默认 60 秒，可调      | ✅                              | ✅                   | ❌ 新会话       | ❌ 需要手动 reattach        |
+| 输出**逐字节**送达                     | ✅                       | ❌ 只同步最新一屏               | ✅                   | ❌              | ✅ 在 pane 里，连接本身不行 |
+| `scp`、`sftp`、`rsync`、SSH 上的 `git` | ✅                       | ❌ 只有终端                     | ❌ 终端和隧道        | ✅              | ✅                          |
+| `-L` / `-R` / `-D` 转发、agent 转发    | ✅                       | ❌                              | 部分                | ✅              | ✅                          |
+| 终端回滚（scrollback）正常             | ✅                       | ❌                              | ✅                   | ✅              | ✅                          |
+| sshd 不改，SSH 认证与加密不变          | ✅                       | ✅ 用 ssh 引导                  | ✅                   | ✅              | ✅                          |
+| 服务端需要                             | 一个进程，一个 UDP 端口 | `mosh-server`，UDP 60000–61000 | `etserver` 守护进程 | 无             | 无                         |
+| 慢链路上的输入预测                     | ❌                       | ✅                              | ❌                   | ❌              | ❌                          |
 
 tingly-ssh 和 tmux 分工不同，配合使用最好：隧道负责让**连接**扛过网络变化；万一连接真的断了
 （比如笔记本关机一小时），由 tmux 保住**正在做的事**。
@@ -65,17 +65,17 @@ tingly-ssh 和 tmux 分工不同，配合使用最好：隧道负责让**连接*
 
 ### 1. 两端都装上
 
-每个 [release](https://github.com/0x0079/tingly-ssh/releases) 都附带 linux/darwin × amd64/arm64 的预编译包：
+每个 [release](https://github.com/tingly-dev/tingly-ssh/releases) 都附带 linux/darwin × amd64/arm64 的预编译包：
 
 ```bash
 # 把 VERSION、OS（linux|darwin）、ARCH（amd64|arm64）换成实际值
-curl -LO https://github.com/0x0079/tingly-ssh/releases/download/vVERSION/tingly-ssh_VERSION_OS_ARCH.tar.gz
+curl -LO https://github.com/tingly-dev/tingly-ssh/releases/download/vVERSION/tingly-ssh_VERSION_OS_ARCH.tar.gz
 tar xzf tingly-ssh_VERSION_OS_ARCH.tar.gz
 sudo install -m 755 tingly-ssh /usr/local/bin/
 tingly-ssh version
 ```
 
-也可以用 Go 1.26+：`go install github.com/0x0079/tingly-ssh/cmd/tingly-ssh@latest`。
+也可以用 Go 1.26+：`go install github.com/tingly-dev/tingly-ssh/cmd/tingly-ssh@latest`。
 
 ### 2. 服务端：和 sshd 放在一起
 
@@ -185,12 +185,12 @@ ssh -p 2222 alice@127.0.0.1
 <details>
 <summary><b>调参</b></summary>
 
-| 参数 | 位置 | 作用 |
-| --- | --- | --- |
-| `--session-linger` | 客户端和服务端 | 断网多久以内还能恢复（默认 60s） |
-| `--idle-timeout`、`--keepalive` | 客户端 | 多快发现链路已死；笔记本用 `8s` / `2s` 比较合适 |
-| `--window` | 两端 | 每条流的窗口，同时限制重放缓冲占用的内存 |
-| `--max-sessions` | 服务端 | 限制服务端内存。启动时会打印最坏情况，请按实际并发来设 |
+| 参数                            | 位置           | 作用                                                   |
+| ------------------------------- | -------------- | ------------------------------------------------------ |
+| `--session-linger`              | 客户端和服务端 | 断网多久以内还能恢复（默认 60s）                       |
+| `--idle-timeout`、`--keepalive` | 客户端         | 多快发现链路已死；笔记本用 `8s` / `2s` 比较合适        |
+| `--window`                      | 两端           | 每条流的窗口，同时限制重放缓冲占用的内存               |
+| `--max-sessions`                | 服务端         | 限制服务端内存。启动时会打印最坏情况，请按实际并发来设 |
 
 对客户端或 proxy 进程发 `kill -USR1` 会立即重连，适合挂在网络切换的钩子里。
 </details>

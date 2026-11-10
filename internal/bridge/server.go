@@ -16,10 +16,10 @@ import (
 	"github.com/quic-go/quic-go"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/0x0079/tingly-ssh/internal/auth"
-	"github.com/0x0079/tingly-ssh/internal/mux"
-	"github.com/0x0079/tingly-ssh/internal/proto"
-	"github.com/0x0079/tingly-ssh/internal/transport"
+	"github.com/tingly-dev/tingly-ssh/internal/auth"
+	"github.com/tingly-dev/tingly-ssh/internal/mux"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/transport"
 )
 
 // handshakeTimeout bounds how long a new connection may take to send HELLO.

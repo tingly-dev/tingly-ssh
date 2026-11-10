@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/0x0079/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
 )
 
 // KeyIDPrefix marks a session identity that came from an SSH key. The rest is

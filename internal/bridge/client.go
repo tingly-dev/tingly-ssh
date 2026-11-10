@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/0x0079/tingly-ssh/internal/auth"
-	"github.com/0x0079/tingly-ssh/internal/mux"
-	"github.com/0x0079/tingly-ssh/internal/proto"
-	"github.com/0x0079/tingly-ssh/internal/transport"
+	"github.com/tingly-dev/tingly-ssh/internal/auth"
+	"github.com/tingly-dev/tingly-ssh/internal/mux"
+	"github.com/tingly-dev/tingly-ssh/internal/proto"
+	"github.com/tingly-dev/tingly-ssh/internal/transport"
 )
 
 // Reconnect backoff bounds (docs/03-session-resumption.md §3).
