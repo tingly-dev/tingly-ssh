@@ -9,3 +9,5 @@
 /test/roaming/.bin/
 /test/roaming/artifacts/
 demo/out/
+
+/dist/
