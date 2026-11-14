@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ type Client struct {
 
 	// Connection state
 	client      *ssh.Client
+	jumps       []*ssh.Client // hosts client is tunnelled through, outermost first
 	config      *Config
 	connected   bool
 	connectTime time.Time
@@ -56,7 +58,8 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-// Connect establishes an SSH connection with the given configuration
+// Connect establishes an SSH connection with the given configuration, going
+// through config.Jump first when set.
 // Returns error if connection fails or already connected
 func (c *Client) Connect(config *Config) error {
 	if config == nil {
@@ -74,6 +77,39 @@ func (c *Client) Connect(config *Config) error {
 		return newError(ErrAlreadyConnected, "already connected, disconnect first")
 	}
 
+	hops := config.chain()
+	var jumps []*ssh.Client
+	var via *ssh.Client
+	for i, hop := range hops {
+		client, err := dialHop(hop, via, hopLabel(i, len(hops)))
+		if err != nil {
+			closeClients(jumps)
+			return err
+		}
+		if i < len(hops)-1 {
+			jumps = append(jumps, client)
+		}
+		via = client
+	}
+	client := via
+
+	c.client = client
+	c.jumps = jumps
+	c.config = config
+	c.connected = true
+	c.connectTime = time.Now()
+
+	log.Printf("tinglyssh: connected %s@%s (server %s, %d jump)", config.Username,
+		net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), client.ServerVersion(), len(jumps))
+
+	go c.monitor(client, jumps)
+
+	return nil
+}
+
+// dialHop opens one SSH connection: directly, or through via when it is set.
+// label prefixes errors so a failure names its hop.
+func dialHop(config *Config, via *ssh.Client, label string) (*ssh.Client, error) {
 	// Parse private key
 	var signer ssh.Signer
 	var err error
@@ -85,7 +121,7 @@ func (c *Client) Connect(config *Config) error {
 	}
 
 	if err != nil {
-		return wrapError(ErrKeyInvalid, fmt.Errorf("failed to parse private key: %w", err))
+		return nil, wrapError(ErrKeyInvalid, fmt.Errorf("%sfailed to parse private key: %w", label, err))
 	}
 
 	// Build SSH client config
@@ -110,23 +146,57 @@ func (c *Client) Connect(config *Config) error {
 		}
 	}
 
-	// Connect
-	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
-	client, err := ssh.Dial("tcp", addr, sshConfig)
-	if err != nil {
-		return wrapError(ErrConnectionFailed, fmt.Errorf("failed to connect to %s: %w", addr, err))
+	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
+	if via == nil {
+		client, err := ssh.Dial("tcp", addr, sshConfig)
+		if err != nil {
+			return nil, wrapError(ErrConnectionFailed, fmt.Errorf("%sfailed to connect to %s: %w", label, addr, err))
+		}
+		return client, nil
 	}
 
-	c.client = client
-	c.config = config
-	c.connected = true
-	c.connectTime = time.Now()
+	// Through a jump host: open a direct-tcpip channel and run the SSH handshake over it.
+	// Channel conns have no deadlines, so the timeout is enforced around the whole attempt.
+	type result struct {
+		client *ssh.Client
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		conn, err := via.Dial("tcp", addr)
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		cc, chans, reqs, err := ssh.NewClientConn(conn, addr, sshConfig)
+		if err != nil {
+			conn.Close()
+			done <- result{err: err}
+			return
+		}
+		done <- result{client: ssh.NewClient(cc, chans, reqs)}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, wrapError(ErrConnectionFailed, fmt.Errorf("%sfailed to connect to %s via jump host: %w", label, addr, r.err))
+		}
+		return r.client, nil
+	case <-time.After(sshConfig.Timeout):
+		go func() {
+			if r := <-done; r.client != nil {
+				r.client.Close()
+			}
+		}()
+		return nil, newErrorf(ErrTimeout, "%sconnect to %s via jump host timed out after %s", label, addr, sshConfig.Timeout)
+	}
+}
 
-	log.Printf("tinglyssh: connected %s@%s (server %s)", config.Username, addr, client.ServerVersion())
-
-	go c.monitor(client)
-
-	return nil
+// closeClients closes clients innermost-last-opened first
+func closeClients(clients []*ssh.Client) {
+	for i := len(clients) - 1; i >= 0; i-- {
+		clients[i].Close()
+	}
 }
 
 // SetConnectionListener registers a listener for unexpected connection loss (nil to clear)
@@ -137,11 +207,29 @@ func (c *Client) SetConnectionListener(l ConnectionListener) {
 }
 
 // monitor sends keepalives and watches for the connection to end.
+// jumps are the hosts client is tunnelled through: any of them dying ends the
+// connection, and each is kept alive on its own.
 // If client is still the active connection when it ends, state is reset
 // and the listener is notified.
-func (c *Client) monitor(client *ssh.Client) {
-	closed := make(chan error, 1)
-	go func() { closed <- client.Wait() }()
+func (c *Client) monitor(client *ssh.Client, jumps []*ssh.Client) {
+	closed := make(chan string, 1)
+	jumpClosed := make(chan string, len(jumps)+1)
+	go func() {
+		reason := "connection closed"
+		if err := client.Wait(); err != nil {
+			reason = err.Error()
+		}
+		closed <- reason
+	}()
+	for i, j := range jumps {
+		go func(i int, j *ssh.Client) {
+			reason := fmt.Sprintf("jump host %d connection closed", i+1)
+			if err := j.Wait(); err != nil {
+				reason += ": " + err.Error()
+			}
+			jumpClosed <- reason
+		}(i, j)
+	}
 
 	ticker := time.NewTicker(keepaliveInterval)
 	defer ticker.Stop()
@@ -149,19 +237,35 @@ func (c *Client) monitor(client *ssh.Client) {
 	reason := "connection closed"
 	for running := true; running; {
 		select {
-		case err := <-closed:
-			if err != nil {
-				reason = err.Error()
+		case reason = <-closed:
+			// A dead jump host also kills the connection through it; prefer naming the jump
+			if len(jumps) > 0 {
+				select {
+				case reason = <-jumpClosed:
+				case <-time.After(200 * time.Millisecond):
+				}
 			}
 			running = false
+		case reason = <-jumpClosed:
+			running = false
 		case <-ticker.C:
-			if err := sendKeepalive(client); err != nil {
-				reason = "keepalive failed: " + err.Error()
-				client.Close()
-				running = false
+			for i, j := range jumps {
+				if err := sendKeepalive(j); err != nil {
+					reason = fmt.Sprintf("jump host %d keepalive failed: %s", i+1, err)
+					running = false
+					break
+				}
+			}
+			if running {
+				if err := sendKeepalive(client); err != nil {
+					reason = "keepalive failed: " + err.Error()
+					running = false
+				}
 			}
 		}
 	}
+	client.Close()
+	closeClients(jumps)
 
 	c.mu.Lock()
 	if c.client != client {
@@ -171,6 +275,7 @@ func (c *Client) monitor(client *ssh.Client) {
 	}
 	c.closeTunnelsLocked()
 	c.client = nil
+	c.jumps = nil
 	c.connected = false
 	c.config = nil
 	listener := c.listener
@@ -223,6 +328,8 @@ func (c *Client) Disconnect() {
 		c.client.Close()
 		c.client = nil
 	}
+	closeClients(c.jumps)
+	c.jumps = nil
 
 	c.connected = false
 	c.config = nil

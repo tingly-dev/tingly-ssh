@@ -11,10 +11,60 @@ type Config struct {
 	PrivateKey string // Private key content (PEM format)
 	Passphrase string // Passphrase for encrypted private key (optional)
 	KnownHosts string // Known hosts content (optional, for host verification)
+
+	// Jump is an optional jump host (like OpenSSH ProxyJump): this connection is
+	// opened through it. Jump may itself have a Jump, up to MaxHops hosts in total.
+	Jump *Config
 }
 
-// Validate validates the SSH configuration
+// MaxHops is the longest supported chain, target included (1 jump + target = 2).
+const MaxHops = 2
+
+// chain returns the hosts to connect through, jump hosts first, target last.
+func (c *Config) chain() []*Config {
+	var hops []*Config
+	for h := c; h != nil; h = h.Jump {
+		hops = append(hops, h)
+		if len(hops) > MaxHops {
+			break // guards against cycles; Validate rejects the chain
+		}
+	}
+	for i, j := 0, len(hops)-1; i < j; i, j = i+1, j-1 {
+		hops[i], hops[j] = hops[j], hops[i]
+	}
+	return hops
+}
+
+// Validate validates the SSH configuration, including every jump host
 func (c *Config) Validate() error {
+	hops := c.chain()
+	if len(hops) > MaxHops {
+		return newErrorf(ErrInvalidConfig, "too many hops: at most %d hosts (%d jump) are supported", MaxHops, MaxHops-1)
+	}
+	for i, h := range hops {
+		if err := h.validateHost(); err != nil {
+			if len(hops) > 1 {
+				err.Message = hopLabel(i, len(hops)) + err.Error()
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// hopLabel prefixes errors with the hop they belong to; empty for a direct connection.
+func hopLabel(i, n int) string {
+	switch {
+	case n <= 1:
+		return ""
+	case i < n-1:
+		return "jump host: "
+	default:
+		return "target host: "
+	}
+}
+
+func (c *Config) validateHost() *Error {
 	if c.Host == "" {
 		return newError(ErrInvalidConfig, "host is required")
 	}

@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,9 +19,10 @@ import (
 // testSSHServer is a minimal in-process SSH server that accepts any public key
 // and supports direct-tcpip (local forwarding) channels.
 type testSSHServer struct {
-	ln    net.Listener
-	mu    sync.Mutex
-	conns []net.Conn
+	ln       net.Listener
+	mu       sync.Mutex
+	conns    []net.Conn
+	forwards atomic.Int32 // direct-tcpip channels opened through this server
 }
 
 func newTestSSHServer(t *testing.T) *testSSHServer {
@@ -74,6 +76,7 @@ func (s *testSSHServer) serve(nc net.Conn, cfg *ssh.ServerConfig) {
 			OrigPort uint32
 		}
 		ssh.Unmarshal(nch.ExtraData(), &target)
+		s.forwards.Add(1)
 		dst, err := net.Dial("tcp", net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port))))
 		if err != nil {
 			nch.Reject(ssh.ConnectionFailed, err.Error())
