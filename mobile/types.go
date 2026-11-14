@@ -14,6 +14,8 @@ type SshConfig struct {
 	PrivateKey string
 	Passphrase string
 	KnownHosts string
+	// Jump is an optional jump host this connection is opened through (ProxyJump).
+	Jump *SshConfig
 }
 
 // TunnelConfig holds port forwarding configuration.
@@ -67,7 +69,7 @@ const (
 	ErrInvalidConfig    = sshclient.ErrInvalidConfig
 )
 
-func (c *SshConfig) Validate() error    { return (*sshclient.Config)(c).Validate() }
+func (c *SshConfig) Validate() error    { return toConfig(c).Validate() }
 func (c *TunnelConfig) Validate() error { return (*sshclient.TunnelConfig)(c).Validate() }
 
 func toTunnelState(s *sshclient.TunnelState) *TunnelState {
@@ -87,3 +89,23 @@ func toKeyInfo(i *sshclient.KeyInfo) *SshKeyInfo {
 }
 
 func (i *SshKeyInfo) String() string { return (*sshclient.KeyInfo)(i).String() }
+
+// toConfig converts including the jump chain. Hops past sshclient.MaxHops are
+// dropped from the copy, so a cyclic chain still ends and is then rejected by
+// sshclient's own hop-count validation.
+func toConfig(c *SshConfig) *sshclient.Config {
+	if c == nil {
+		return nil
+	}
+	head := &sshclient.Config{}
+	cur := head
+	for src, n := c, 0; src != nil && n <= sshclient.MaxHops; src, n = src.Jump, n+1 {
+		cur.Host, cur.Port, cur.Username = src.Host, src.Port, src.Username
+		cur.PrivateKey, cur.Passphrase, cur.KnownHosts = src.PrivateKey, src.Passphrase, src.KnownHosts
+		if src.Jump != nil && n < sshclient.MaxHops {
+			cur.Jump = &sshclient.Config{}
+			cur = cur.Jump
+		}
+	}
+	return head
+}

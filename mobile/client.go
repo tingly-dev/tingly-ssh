@@ -16,11 +16,11 @@ type SshClient struct {
 func NewSshClient() *SshClient { return &SshClient{c: sshclient.NewClient()} }
 
 func (s *SshClient) Connect(config *SshConfig) error {
-	return s.c.Connect((*sshclient.Config)(config))
+	return s.c.Connect(toConfig(config))
 }
 
 func (s *SshClient) VerifyConnection(config *SshConfig) error {
-	return s.c.VerifyConnection((*sshclient.Config)(config))
+	return s.c.VerifyConnection(toConfig(config))
 }
 
 func (s *SshClient) SetConnectionListener(l ConnectionListener) {

@@ -57,3 +57,22 @@ func TestQuickVerifyWithInvalidConfig(t *testing.T) {
 		t.Error("Expected error for empty config")
 	}
 }
+
+func TestToConfigCopiesJumpChain(t *testing.T) {
+	cfg := &SshConfig{Host: "target", Port: 22, Username: "t", Jump: &SshConfig{Host: "jump", Port: 2222, Username: "j"}}
+	got := toConfig(cfg)
+	if got.Host != "target" || got.Jump == nil || got.Jump.Host != "jump" || got.Jump.Port != 2222 {
+		t.Fatalf("jump chain not copied: %+v", got)
+	}
+	if toConfig(nil) != nil {
+		t.Error("nil should stay nil")
+	}
+}
+
+func TestToConfigStopsOnCycle(t *testing.T) {
+	a := &SshConfig{Host: "a", Port: 22, Username: "u", PrivateKey: "k"}
+	a.Jump = a
+	if err := a.Validate(); err == nil {
+		t.Error("cyclic jump chain should fail validation")
+	}
+}
