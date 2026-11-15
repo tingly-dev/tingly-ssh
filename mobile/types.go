@@ -44,6 +44,16 @@ type SshKeyInfo struct {
 	HasPassphrase bool
 }
 
+// KeyInspection describes a private key without needing its passphrase.
+type KeyInspection struct {
+	Container   string
+	KeyType     string
+	Bits        int
+	Encrypted   bool
+	Fingerprint string
+	Unsupported string
+}
+
 // KeyPairResult holds a generated key pair (gomobile allows max 2 return values).
 type KeyPairResult struct {
 	PrivateKey string

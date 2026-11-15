@@ -77,41 +77,198 @@ func (p *KeyParser) ParseKey(keyContent, passphrase string) (*KeyInfo, error) {
 	// Trim newline from public key
 	info.PublicKey = strings.TrimSpace(info.PublicKey)
 
-	// Determine key type and size
-	pubKey := signer.PublicKey()
-	switch pubKey.Type() {
-	case ssh.KeyAlgoRSA:
-		info.Format = "RSA"
-		// Extract RSA key to get bit size
-		if rsaPub, ok := pubKey.(ssh.CryptoPublicKey); ok {
-			cryptoPub := rsaPub.CryptoPublicKey()
-			if rsaKey, ok := cryptoPub.(*rsa.PublicKey); ok {
-				info.Bits = rsaKey.N.BitLen()
-			}
-		}
-	case ssh.KeyAlgoED25519:
-		info.Format = "Ed25519"
-		info.Bits = 256 // Ed25519 always uses 256-bit keys
-	case ssh.KeyAlgoECDSA256:
-		info.Format = "ECDSA"
-		info.Bits = 256
-	case ssh.KeyAlgoECDSA384:
-		info.Format = "ECDSA"
-		info.Bits = 384
-	case ssh.KeyAlgoECDSA521:
-		info.Format = "ECDSA"
-		info.Bits = 521
-	case ssh.KeyAlgoDSA:
-		info.Format = "DSA"
-		info.Bits = 1024 // DSA is typically 1024 bits
-	case ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
-		info.Format = "SecurityKey"
-		info.Bits = 256
-	default:
-		info.Format = "Unknown"
-	}
+	info.Format, info.Bits = describeKey(signer.PublicKey())
 
 	return info, nil
+}
+
+// describeKey names a public key's type and size, using the KeyInfo.Format /
+// KeyInspection.KeyType vocabulary.
+func describeKey(pub ssh.PublicKey) (string, int) {
+	switch pub.Type() {
+	case ssh.KeyAlgoRSA:
+		if cp, ok := pub.(ssh.CryptoPublicKey); ok {
+			if rsaKey, ok := cp.CryptoPublicKey().(*rsa.PublicKey); ok {
+				return "RSA", rsaKey.N.BitLen()
+			}
+		}
+		return "RSA", 0
+	case ssh.KeyAlgoED25519:
+		return "Ed25519", 256
+	case ssh.KeyAlgoECDSA256:
+		return "ECDSA", 256
+	case ssh.KeyAlgoECDSA384:
+		return "ECDSA", 384
+	case ssh.KeyAlgoECDSA521:
+		return "ECDSA", 521
+	case ssh.KeyAlgoDSA:
+		return "DSA", 1024
+	case ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
+		return "SecurityKey", 256
+	default:
+		return "Unknown", 0
+	}
+}
+
+// opensshCiphers are the private-key ciphers x/crypto/ssh can decrypt.
+var opensshCiphers = map[string]bool{"none": true, "aes256-ctr": true, "aes256-cbc": true}
+
+// InspectKey reports what a private key is and whether connecting with it can
+// work, without needing its passphrase. It never fails: problems are reported
+// in Unsupported, worded for showing to the user.
+//
+// The answer matches what Connect does with the key: a key without an
+// Unsupported reason loads with ParsePrivateKey[WithPassphrase].
+func (p *KeyParser) InspectKey(keyContent string) *KeyInspection {
+	keyContent = strings.TrimSpace(keyContent)
+	ki := &KeyInspection{Container: "Unknown", KeyType: "Unknown"}
+
+	if strings.HasPrefix(keyContent, "PuTTY-User-Key-File-") {
+		ki.Container = "PuTTY"
+		header, _, _ := strings.Cut(keyContent, "\n")
+		if _, algo, ok := strings.Cut(header, ":"); ok {
+			ki.KeyType = algoKeyType(strings.TrimSpace(algo))
+		}
+		ki.Encrypted = !strings.Contains(keyContent, "Encryption: none")
+		ki.Unsupported = "PuTTY .ppk keys aren't supported. In PuTTYgen use Conversions → Export OpenSSH key"
+		return ki
+	}
+	if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(keyContent)); err == nil {
+		return publicKeyInspection(ki, pub)
+	}
+
+	block, _ := pem.Decode([]byte(keyContent))
+	if block == nil {
+		ki.Unsupported = "Unrecognized key format"
+		return ki
+	}
+
+	switch block.Type {
+	case "OPENSSH PRIVATE KEY":
+		return inspectOpenSSH(ki, block.Bytes)
+	case "ENCRYPTED PRIVATE KEY":
+		ki.Container = "PKCS8-Encrypted"
+		ki.Encrypted = true
+		ki.Unsupported = "Encrypted PKCS#8 keys aren't supported. Convert with: ssh-keygen -p -f <keyfile>"
+		return ki
+	case "SSH2 PUBLIC KEY", "PUBLIC KEY":
+		ki.Container = "PublicKey"
+		ki.Unsupported = publicKeyMistake
+		return ki
+	case "RSA PRIVATE KEY":
+		ki.Container, ki.KeyType = "PKCS1", "RSA"
+	case "EC PRIVATE KEY":
+		ki.Container, ki.KeyType = "SEC1", "ECDSA"
+	case "DSA PRIVATE KEY":
+		ki.Container, ki.KeyType = "DSA", "DSA"
+	case "PRIVATE KEY":
+		ki.Container = "PKCS8"
+	default:
+		ki.Unsupported = fmt.Sprintf("Unsupported key type %q", block.Type)
+		return ki
+	}
+
+	// Legacy PEM encryption hides everything, public key included, until decrypted
+	if x509.IsEncryptedPEMBlock(block) {
+		ki.Encrypted = true
+		return ki
+	}
+	signer, err := ssh.ParsePrivateKey([]byte(keyContent))
+	if err != nil {
+		if ki.Container == "PKCS8" {
+			// x509 rejects PKCS#8 algorithms SSH can't use (DSA, Ed448, ...)
+			ki.Unsupported = "Unsupported PKCS#8 key algorithm. Use an Ed25519, ECDSA or RSA key"
+		} else {
+			ki.Unsupported = "Invalid key: " + err.Error()
+		}
+		return ki
+	}
+	ki.KeyType, ki.Bits = describeKey(signer.PublicKey())
+	ki.Fingerprint = ssh.FingerprintSHA256(signer.PublicKey())
+	return ki
+}
+
+const publicKeyMistake = "This is a public key. Paste the private key instead (e.g. ~/.ssh/id_ed25519, not id_ed25519.pub)"
+
+func publicKeyInspection(ki *KeyInspection, pub ssh.PublicKey) *KeyInspection {
+	ki.Container = "PublicKey"
+	ki.KeyType, ki.Bits = describeKey(pub)
+	ki.Fingerprint = ssh.FingerprintSHA256(pub)
+	ki.Unsupported = publicKeyMistake
+	return ki
+}
+
+func algoKeyType(algo string) string {
+	switch {
+	case algo == ssh.KeyAlgoRSA:
+		return "RSA"
+	case algo == ssh.KeyAlgoED25519:
+		return "Ed25519"
+	case strings.HasPrefix(algo, "ecdsa-sha2-"):
+		return "ECDSA"
+	case algo == ssh.KeyAlgoDSA:
+		return "DSA"
+	case strings.HasPrefix(algo, "sk-"):
+		return "SecurityKey"
+	default:
+		return "Unknown"
+	}
+}
+
+// inspectOpenSSH reads the openssh-key-v1 header: magic, cipher, kdf, kdf
+// options, key count, then the public key, which is never encrypted.
+func inspectOpenSSH(ki *KeyInspection, data []byte) *KeyInspection {
+	ki.Container = "OpenSSH"
+	const magic = "openssh-key-v1\x00"
+	if !bytes.HasPrefix(data, []byte(magic)) {
+		ki.Unsupported = "Key data is corrupted"
+		return ki
+	}
+	var hdr struct {
+		Cipher  string
+		Kdf     string
+		KdfOpts string
+		NumKeys uint32
+		PubKey  []byte
+		Rest    []byte `ssh:"rest"`
+	}
+	if err := ssh.Unmarshal(data[len(magic):], &hdr); err != nil || hdr.NumKeys != 1 {
+		ki.Unsupported = "Key data is corrupted"
+		return ki
+	}
+	ki.Encrypted = hdr.Cipher != "none"
+
+	pub, err := ssh.ParsePublicKey(hdr.PubKey)
+	if err != nil {
+		var w struct {
+			Algo string
+			Rest []byte `ssh:"rest"`
+		}
+		if ssh.Unmarshal(hdr.PubKey, &w) == nil {
+			ki.KeyType = algoKeyType(w.Algo)
+			ki.Unsupported = fmt.Sprintf("Unsupported key algorithm %q", w.Algo)
+		} else {
+			ki.Unsupported = "Key data is corrupted"
+		}
+		return ki
+	}
+	ki.KeyType, ki.Bits = describeKey(pub)
+	ki.Fingerprint = ssh.FingerprintSHA256(pub)
+
+	switch {
+	case ki.KeyType == "SecurityKey":
+		ki.Unsupported = "FIDO security keys need the hardware token and can't be used here"
+	case ki.KeyType == "DSA":
+		ki.Unsupported = "DSA keys in OpenSSH format aren't supported (DSA is deprecated; use Ed25519)"
+	case !opensshCiphers[hdr.Cipher]:
+		ki.Unsupported = fmt.Sprintf("Key encryption %q isn't supported. Re-encrypt with: ssh-keygen -p -Z aes256-ctr -f <keyfile>", hdr.Cipher)
+	case !ki.Encrypted:
+		// Catch damage in the private half, which the header doesn't cover
+		if _, err := ssh.ParseRawPrivateKey(pem.EncodeToMemory(&pem.Block{Type: "OPENSSH PRIVATE KEY", Bytes: data})); err != nil {
+			ki.Unsupported = "Invalid key: " + err.Error()
+		}
+	}
+	return ki
 }
 
 // GetSupportedFormats returns a list of supported key formats

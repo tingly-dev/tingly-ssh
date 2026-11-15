@@ -129,6 +129,17 @@ func (i *KeyInfo) String() string {
 	return fmt.Sprintf("%s-%d %s", i.Format, i.Bits, i.Fingerprint)
 }
 
+// KeyInspection describes a private key as far as can be told without its
+// passphrase. Produced by KeyParser.InspectKey.
+type KeyInspection struct {
+	Container   string // "OpenSSH", "PKCS1", "PKCS8", "SEC1", "DSA", "PKCS8-Encrypted", "PuTTY", "PublicKey", "Unknown"
+	KeyType     string // "RSA", "Ed25519", "ECDSA", "DSA", "SecurityKey", "Unknown"
+	Bits        int    // Key size in bits (0 if unknown)
+	Encrypted   bool   // Whether a passphrase is needed to use the key
+	Fingerprint string // SHA256 fingerprint; empty when it can't be read without the passphrase
+	Unsupported string // Why the key can't be used for connecting; empty when it can
+}
+
 // KeyPairResult holds the result of key pair generation
 // Used because gomobile only supports max 2 return values (result, error)
 type KeyPairResult struct {

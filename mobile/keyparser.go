@@ -17,6 +17,12 @@ func (p *SshKeyParser) ParseKey(keyContent, passphrase string) (*SshKeyInfo, err
 	return toKeyInfo(info), nil
 }
 
+// InspectKey reports a key's type, format and whether it can be used, without its passphrase.
+func (p *SshKeyParser) InspectKey(keyContent string) *KeyInspection {
+	k := KeyInspection(*p.p.InspectKey(keyContent))
+	return &k
+}
+
 func (p *SshKeyParser) GetSupportedFormats() []string { return p.p.GetSupportedFormats() }
 
 func (p *SshKeyParser) ValidateKey(keyContent string) error { return p.p.ValidateKey(keyContent) }
