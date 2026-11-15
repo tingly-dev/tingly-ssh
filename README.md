@@ -93,9 +93,20 @@ tingly-ssh server --listen :7443 --target 127.0.0.1:22 \
 
 Open **UDP** 7443 in your firewall or cloud security group. A [systemd unit](docs/09-migrating-from-ssh.md#23-启动systemd) is in the migration guide.
 
-### 3. Client: one line in `~/.ssh/config`
+### 3. Client: one command
 
-Add a new alias next to your existing one, so you can compare the two and switch back at any time:
+Make sure your key is in the agent (`ssh-add -l`), then:
+
+```console
+$ tingly-ssh ssh alice@203.0.113.10
+level=WARN msg="trusting this server key from now on" pin="sha256:XUYr8w..."
+alice@myserver:~$
+```
+
+Use it exactly like `ssh`: the same options, your `~/.ssh/config` aliases, a remote command — just put `tingly-ssh` in front, e.g.
+`tingly-ssh ssh -p 2222 myserver tmux attach`. The tunnel is assumed on port 7443 of the same host; if it lives elsewhere, add `--server HOST:PORT` before the destination. That one-time warning works like SSH's "Are you sure you want to continue connecting": compare the pin with the one the server printed.
+
+Or make it permanent with one line in `~/.ssh/config` — a new alias next to your existing one, so you can compare the two and switch back at any time:
 
 ```sshconfig
 Host myserver-roam
@@ -104,15 +115,7 @@ Host myserver-roam
     ProxyCommand tingly-ssh proxy --server %h:7443
 ```
 
-Make sure your key is in the agent (`ssh-add -l`), then connect:
-
-```console
-$ ssh myserver-roam
-level=WARN msg="trusting this server key from now on" pin="sha256:XUYr8w..."
-alice@myserver:~$
-```
-
-That one-time line works like SSH's "Are you sure you want to continue connecting": compare the pin with the one the server printed.
+Then connect with plain `ssh myserver-roam`.
 
 ### 4. See it work
 
@@ -221,7 +224,7 @@ MPTCP needs kernel support at both ends and silently falls back without it. Wire
 
 Every push runs, against a **real sshd** with **real OpenSSH clients**:
 
-- **18 end-to-end cases**: ProxyCommand, scp integrity, link destruction, a 30 s network black hole, the linger deadline, refused credentials, a two-hop chain through an unmodified jump host ([`test/e2e`](test/e2e/));
+- **20 end-to-end cases**: ProxyCommand, scp integrity, link destruction, a 30 s network black hole, the linger deadline, refused credentials, a two-hop chain through an unmodified jump host ([`test/e2e`](test/e2e/));
 - **17 everyday-SSH scenarios**: an interactive pty, 32 MiB of output, all 256 byte values, Ctrl-C, window resize, `-L/-R/-D`, sftp, rsync, ControlMaster, tmux ([`test/scenarios`](test/scenarios/));
 - **7 roaming cases**, measured by a remote counter: continuity proves nothing was lost or repeated, and the largest arrival gap is how long your terminal actually froze. The same suite drives real radios through `nmcli` or macOS ([`test/roaming`](test/roaming/));
 - unit and fault-injection tests for the session layer, under `go test -race`.

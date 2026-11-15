@@ -92,9 +92,21 @@ tingly-ssh server --listen :7443 --target 127.0.0.1:22 \
 
 在防火墙或云安全组里放行 **UDP** 7443。systemd unit 见[迁移指南](docs/09-migrating-from-ssh.md#23-启动systemd)。
 
-### 3. 客户端：`~/.ssh/config` 里加一行
+### 3. 客户端：一条命令
 
-在原来的 Host 旁边新加一个别名，两个可以对比着用，随时能退回：
+确认钥匙在 agent 里（`ssh-add -l`），然后：
+
+```console
+$ tingly-ssh ssh alice@203.0.113.10
+level=WARN msg="trusting this server key from now on" pin="sha256:XUYr8w..."
+alice@myserver:~$
+```
+
+用法和 `ssh` 完全一样：同样的选项、`~/.ssh/config` 里的别名、远端命令都照写，只是前面加上 `tingly-ssh`，比如
+`tingly-ssh ssh -p 2222 myserver tmux attach`。隧道默认在同一台主机的 7443 端口；不在的话，在目标前面加 `--server HOST:PORT`。
+那行警告只会出现一次，作用和 SSH 的 "Are you sure you want to continue connecting" 一样：拿它和服务端打印的 pin 核对一下。
+
+想长期使用，就在 `~/.ssh/config` 里加一行——在原来的 Host 旁边新加一个别名，两个可以对比着用，随时能退回：
 
 ```sshconfig
 Host myserver-roam
@@ -103,15 +115,7 @@ Host myserver-roam
     ProxyCommand tingly-ssh proxy --server %h:7443
 ```
 
-确认钥匙在 agent 里（`ssh-add -l`），然后连接：
-
-```console
-$ ssh myserver-roam
-level=WARN msg="trusting this server key from now on" pin="sha256:XUYr8w..."
-alice@myserver:~$
-```
-
-这行只会出现一次，作用和 SSH 的 "Are you sure you want to continue connecting" 一样：拿它和服务端打印的 pin 核对一下。
+之后用普通的 `ssh myserver-roam` 即可。
 
 ### 4. 亲眼看看
 
@@ -216,7 +220,7 @@ MPTCP 需要两端内核都支持，不支持时会静默退化；WireGuard 能�
 
 每次 push 都会对着**真实的 sshd** 和**真实的 OpenSSH 客户端**跑：
 
-- **18 个端到端用例**：ProxyCommand、scp 完整性、销毁链路、30 秒网络黑洞、linger 截止、凭据被拒、经由未改动跳板机的两跳链路（[`test/e2e`](test/e2e/)）；
+- **20 个端到端用例**：ProxyCommand、scp 完整性、销毁链路、30 秒网络黑洞、linger 截止、凭据被拒、经由未改动跳板机的两跳链路（[`test/e2e`](test/e2e/)）；
 - **17 个日常 SSH 场景**：交互式 pty、32 MiB 输出、全部 256 个字节值、Ctrl-C、窗口缩放、`-L/-R/-D`、sftp、rsync、ControlMaster、tmux（[`test/scenarios`](test/scenarios/)）；
 - **7 个漫游用例**，用远端计数器测量：计数连续说明没丢也没重，最大到达间隔就是终端实际卡住的时长。同一套用例也能通过 `nmcli` 或 macOS 驱动真实的无线网卡（[`test/roaming`](test/roaming/)）；
 - 会话层的单元测试和故障注入测试，在 `go test -race` 下运行。
