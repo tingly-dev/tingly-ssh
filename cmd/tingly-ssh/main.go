@@ -245,42 +245,52 @@ func defaultLogLevel(stdioMode bool) string {
 	return "info"
 }
 
+// clientFlags are the flags of client and proxy mode; ssh mode accepts the
+// same ones and hands them to the proxy it spawns.
+type clientFlags struct {
+	server, listen, target, tokenFile, identity, knownFile, pin, serverName string
+	insecure                                                                bool
+	common                                                                  commonFlags
+}
+
+func (c *clientFlags) bind(fs *flag.FlagSet, stdioMode bool) {
+	fs.StringVar(&c.server, "server", "", "tingly-ssh server address, host:port (required)")
+	fs.StringVar(&c.listen, "listen", "127.0.0.1:2222", "local TCP address to accept ssh on (client mode only)")
+	fs.StringVar(&c.target, "target", "127.0.0.1:22", "target hint sent to the server")
+	fs.StringVar(&c.tokenFile, "token-file", "", "authenticate with this pre-shared token (mode 0600) instead of SSH keys")
+	fs.StringVar(&c.identity, "identity", "", "SSH key to authenticate with: a private key, or a .pub whose key is in ssh-agent (default: every ssh-agent key)")
+	fs.StringVar(&c.knownFile, "known-servers", defaultKnownServers(), "server keys trusted on first use, when authenticating with SSH keys and no --pin")
+	fs.StringVar(&c.pin, "pin", "", "expected server key pin, sha256:<base64>; required with --token-file unless the server has a CA-signed certificate")
+	fs.StringVar(&c.serverName, "server-name", "", "TLS server name; defaults to the --server host")
+	fs.BoolVar(&c.insecure, "insecure", false, "skip server certificate verification (development only)")
+	c.common.bind(fs, defaultLogLevel(stdioMode))
+}
+
 func runClient(ctx context.Context, args []string, stdioMode bool) error {
 	name := "client"
 	if stdioMode {
 		name = "proxy"
 	}
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
-	var (
-		server     = fs.String("server", "", "tingly-ssh server address, host:port (required)")
-		listen     = fs.String("listen", "127.0.0.1:2222", "local TCP address to accept ssh on (client mode only)")
-		target     = fs.String("target", "127.0.0.1:22", "target hint sent to the server")
-		tokenFile  = fs.String("token-file", "", "authenticate with this pre-shared token (mode 0600) instead of SSH keys")
-		identity   = fs.String("identity", "", "SSH key to authenticate with: a private key, or a .pub whose key is in ssh-agent (default: every ssh-agent key)")
-		knownFile  = fs.String("known-servers", defaultKnownServers(), "server keys trusted on first use, when authenticating with SSH keys and no --pin")
-		pin        = fs.String("pin", "", "expected server key pin, sha256:<base64>; required with --token-file unless the server has a CA-signed certificate")
-		serverName = fs.String("server-name", "", "TLS server name; defaults to the --server host")
-		insecure   = fs.Bool("insecure", false, "skip server certificate verification (development only)")
-	)
-	var common commonFlags
-	common.bind(fs, defaultLogLevel(stdioMode))
+	var f clientFlags
+	f.bind(fs, stdioMode)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *server == "" {
+	if f.server == "" {
 		return errors.New("--server is required")
 	}
-	if *tokenFile != "" && *identity != "" {
+	if f.tokenFile != "" && f.identity != "" {
 		return errors.New("pass either --token-file or --identity, not both")
 	}
-	if *serverName == "" {
-		host, _, splitErr := net.SplitHostPort(*server)
+	if f.serverName == "" {
+		host, _, splitErr := net.SplitHostPort(f.server)
 		if splitErr != nil {
 			return fmt.Errorf("--server must be host:port: %w", splitErr)
 		}
-		*serverName = host
+		f.serverName = host
 	}
-	log := common.logger()
+	log := f.common.logger()
 
 	var (
 		token   []byte
@@ -288,12 +298,12 @@ func runClient(ctx context.Context, args []string, stdioMode bool) error {
 		tlsConf *tls.Config
 		err     error
 	)
-	if *tokenFile != "" {
-		if token, err = transport.LoadToken(*tokenFile); err != nil {
+	if f.tokenFile != "" {
+		if token, err = transport.LoadToken(f.tokenFile); err != nil {
 			return err
 		}
 	} else {
-		if prover, err = auth.NewAgentProver(os.Getenv("SSH_AUTH_SOCK"), *identity); err != nil {
+		if prover, err = auth.NewAgentProver(os.Getenv("SSH_AUTH_SOCK"), f.identity); err != nil {
 			return err
 		}
 		// Fail now, not after a linger's worth of retries, when there is no
@@ -309,22 +319,22 @@ func runClient(ctx context.Context, args []string, stdioMode bool) error {
 		log.Debug("authenticating with SSH keys", "source", prover.String(), "keys", strings.Join(fps, ","))
 	}
 	switch {
-	case *pin != "" || *insecure:
-		if *pin == "" && token != nil {
+	case f.pin != "" || f.insecure:
+		if f.pin == "" && token != nil {
 			log.Warn("certificate verification disabled: the pre-shared token can be stolen by a man in the middle; use --pin")
 		}
-		tlsConf, err = transport.ClientTLS(*serverName, *pin, *insecure)
+		tlsConf, err = transport.ClientTLS(f.serverName, f.pin, f.insecure)
 	case token != nil:
 		// A token is a secret, so it is never sent to a server trusted on
 		// first use; without a pin the system trust store applies.
-		tlsConf, err = transport.ClientTLS(*serverName, "", false)
+		tlsConf, err = transport.ClientTLS(f.serverName, "", false)
 	default:
 		// SSH key proofs are bound to the connection and useless to anyone
 		// else, so trusting the server key on first use is safe
 		// (.design/ssh-key-auth.pencil.md §4).
-		known := transport.NewKnownServers(*knownFile)
-		tlsConf, err = transport.ClientTLSTrustOnFirstUse(*serverName, *server, known, func(got string) {
-			log.Warn("trusting this server key from now on", "server", *server, "pin", got, "file", known.Path())
+		known := transport.NewKnownServers(f.knownFile)
+		tlsConf, err = transport.ClientTLSTrustOnFirstUse(f.serverName, f.server, known, func(got string) {
+			log.Warn("trusting this server key from now on", "server", f.server, "pin", got, "file", known.Path())
 		})
 	}
 	if err != nil {
@@ -332,13 +342,13 @@ func runClient(ctx context.Context, args []string, stdioMode bool) error {
 	}
 
 	cfg := bridge.ClientConfig{
-		Server:     *server,
-		Target:     *target,
+		Server:     f.server,
+		Target:     f.target,
 		Token:      token,
-		Window:     common.window,
-		MaxStreams: common.maxStreams,
-		Linger:     common.linger,
-		Tuning:     common.tuning(),
+		Window:     f.common.window,
+		MaxStreams: f.common.maxStreams,
+		Linger:     f.common.linger,
+		Tuning:     f.common.tuning(),
 		TLS:        tlsConf,
 		Logger:     log,
 	}
@@ -360,12 +370,12 @@ func runClient(ctx context.Context, args []string, stdioMode bool) error {
 	if stdioMode {
 		go func() { serveErr <- cli.ServeStdio(ctx) }()
 	} else {
-		ln, err := net.Listen("tcp", *listen)
+		ln, err := net.Listen("tcp", f.listen)
 		if err != nil {
 			return err
 		}
 		defer ln.Close()
-		log.Info("client listening", "addr", ln.Addr().String(), "server", *server, "target", *target)
+		log.Info("client listening", "addr", ln.Addr().String(), "server", f.server, "target", f.target)
 		log.Info("connect with", "cmd", fmt.Sprintf("ssh -p %s user@%s", port(ln.Addr()), host(ln.Addr())))
 		go func() { serveErr <- cli.ServeListener(ctx, ln) }()
 	}
