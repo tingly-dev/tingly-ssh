@@ -62,6 +62,37 @@ case_E2() {
 }
 
 # ---------------------------------------------------------------------------
+# E19 `tingly-ssh ssh` is used like ssh: ssh's own options before the
+#     destination, a config alias, no ProxyCommand in ssh_config
+# ---------------------------------------------------------------------------
+case_E19() {
+    local out
+    out=$(timeout 60 "$BIN" ssh \
+        --server "127.0.0.1:$TUNNEL_PORT" --target "127.0.0.1:$SSHD_PORT" \
+        --token-file "$ART/token" --pin "$PIN" \
+        -F "$ART/ssh_config" -o ConnectTimeout=30 tingly-local 'echo E19-OK; id -un' 2>"$ART/E19.err")
+    if [[ $out == E19-OK* ]]; then
+        record E19 PASS "tingly-ssh ssh reached sshd as $(echo "$out" | tail -1)"
+    else
+        record E19 FAIL "ssh output '$out' (stderr: $(head -c 200 "$ART/E19.err"))"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# E20 `tingly-ssh ssh` keeps a ProxyJump from ssh_config instead of replacing
+#     it with its own ProxyCommand, and says so
+# ---------------------------------------------------------------------------
+case_E20() {
+    local out
+    out=$(timeout 90 "$BIN" ssh -F "$ART/ssh_config" behind-jump 'echo E20-OK' 2>"$ART/E20.err")
+    if [[ $out == E20-OK* ]] && grep -q 'ProxyJump tingly-proxy' "$ART/E20.err"; then
+        record E20 PASS "configured ProxyJump kept, two hops reached"
+    else
+        record E20 FAIL "output '$out' (stderr: $(head -c 300 "$ART/E20.err"))"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # E3  ssh through the client's local TCP listener
 # ---------------------------------------------------------------------------
 case_E3() {
@@ -473,7 +504,7 @@ main() {
     start_tunnel_server
     write_ssh_config
 
-    local all=(E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 E11 E12 E13 E14 E15 E16 E17 E18) id
+    local all=(E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 E11 E12 E13 E14 E15 E16 E17 E18 E19 E20) id
     for id in "${all[@]}"; do
         if ! selected "$id"; then continue; fi
         if [ $QUICK -eq 1 ] && { [ "$id" = E8 ] || [ "$id" = E9 ]; }; then

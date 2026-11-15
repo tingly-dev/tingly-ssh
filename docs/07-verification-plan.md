@@ -52,6 +52,8 @@ E15–E18 另起一个只认 SSH 密钥的隧道服务端（udp 7452）和一个
 | E16 | key 会话中断链 | 流式输出期间两次 `kill -USR1` | 20/20 行；客户端日志 1 次 `auth=ssh-key`、≥2 次 `auth=ticket`（重连不重签） |
 | E17 | 未授权的 key | `--identity` 指向不在白名单里的私钥（不用 agent） | 立即失败（0 次重试），原因 `no offered SSH key is authorized` |
 | E18 | 服务端换钥（TOFU） | 同地址换一把新服务端密钥 | 客户端立即拒绝（0 次重试），报出 known_servers 的行号；服务端 0 次 `link accepted` |
+| E19 | **像 ssh 一样用** | `tingly-ssh ssh --server … -F cfg -o … alias cmd`：ssh 选项写在目标前，ssh_config 里没有 ProxyCommand | 命令输出正确 |
+| E20 | `tingly-ssh ssh` 不覆盖 ProxyJump | 对配置了 `ProxyJump` 的别名运行 `tingly-ssh ssh` | 两跳连通；stderr 一行说明隧道未注入 |
 
 运行方式：
 

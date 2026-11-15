@@ -30,6 +30,7 @@ import (
 const usage = `tingly-ssh - SSH over QUIC with session resumption
 
 Usage:
+  tingly-ssh ssh     [--server HOST:7443] [ssh arguments]     # use it like ssh
   tingly-ssh server  --listen :7443 --target 127.0.0.1:22 --authorized-keys FILE [--credentials FILE]
   tingly-ssh proxy   --server HOST:7443                      # SSH keys from ssh-agent, server key trusted on first use
   tingly-ssh client  --server HOST:7443 --listen 127.0.0.1:2222
@@ -38,6 +39,7 @@ Usage:
   tingly-ssh version
 
 Modes:
+  ssh      run ssh with the tunnel wired in; takes ssh's own arguments
   server   run next to sshd and bridge incoming streams to --target
   client   listen on a local TCP port; "ssh -p 2222 user@127.0.0.1"
   proxy    bridge stdin/stdout, for ssh -o ProxyCommand='tingly-ssh proxy ...'
@@ -67,6 +69,8 @@ func main() {
 	switch os.Args[1] {
 	case "server":
 		err = runServer(ctx, os.Args[2:])
+	case "ssh":
+		err = runSSH(os.Args[2:])
 	case "client":
 		err = runClient(ctx, os.Args[2:], false)
 	case "proxy":
