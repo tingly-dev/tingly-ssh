@@ -13,6 +13,7 @@ const (
 	ErrNotConnected     = 6
 	ErrAlreadyConnected = 7
 	ErrInvalidConfig    = 8
+	ErrCancelled        = 9 // Connect aborted by Disconnect
 )
 
 // Error messages for each error code
@@ -26,6 +27,7 @@ var errorMessages = map[int]string{
 	ErrNotConnected:     "Not connected to SSH server",
 	ErrAlreadyConnected: "Already connected to SSH server",
 	ErrInvalidConfig:    "Invalid configuration",
+	ErrCancelled:        "Connection cancelled",
 }
 
 // Error represents an error from SSH operations

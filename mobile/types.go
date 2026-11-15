@@ -77,6 +77,7 @@ const (
 	ErrNotConnected     = sshclient.ErrNotConnected
 	ErrAlreadyConnected = sshclient.ErrAlreadyConnected
 	ErrInvalidConfig    = sshclient.ErrInvalidConfig
+	ErrCancelled        = sshclient.ErrCancelled
 )
 
 func (c *SshConfig) Validate() error    { return toConfig(c).Validate() }

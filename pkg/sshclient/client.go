@@ -26,6 +26,9 @@ type Client struct {
 	connected   bool
 	connectTime time.Time
 
+	// Cancels the Connect in progress, if any
+	cancelConnect context.CancelFunc
+
 	// Tunnel state
 	tunnelListener     net.Listener
 	forwardingListener net.Listener
@@ -71,27 +74,36 @@ func (c *Client) Connect(config *Config) error {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.connected {
+		c.mu.Unlock()
 		return newError(ErrAlreadyConnected, "already connected, disconnect first")
 	}
-
-	hops := config.chain()
-	var jumps []*ssh.Client
-	var via *ssh.Client
-	for i, hop := range hops {
-		client, err := dialHop(hop, via, hopLabel(i, len(hops)))
-		if err != nil {
-			closeClients(jumps)
-			return err
-		}
-		if i < len(hops)-1 {
-			jumps = append(jumps, client)
-		}
-		via = client
+	if c.cancelConnect != nil {
+		c.mu.Unlock()
+		return newError(ErrAlreadyConnected, "already connecting, disconnect first")
 	}
-	client := via
+	// Dial without holding the lock, so Disconnect can cancel a slow connect
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancelConnect = cancel
+	c.mu.Unlock()
+
+	client, jumps, err := dialChain(ctx, config.chain())
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cancelled := ctx.Err() != nil
+	c.cancelConnect = nil
+	cancel()
+	if cancelled {
+		if err == nil {
+			client.Close()
+			closeClients(jumps)
+		}
+		return newError(ErrCancelled, "connection cancelled")
+	}
+	if err != nil {
+		return err
+	}
 
 	c.client = client
 	c.jumps = jumps
@@ -107,9 +119,32 @@ func (c *Client) Connect(config *Config) error {
 	return nil
 }
 
+// connectTimeout bounds each hop, TCP connect and SSH handshake together.
+// A var so tests can shorten it.
+var connectTimeout = 30 * time.Second
+
+// dialChain connects through hops in order, returning the last one and the
+// jump hosts it goes through. On failure nothing is left open.
+func dialChain(ctx context.Context, hops []*Config) (*ssh.Client, []*ssh.Client, error) {
+	var jumps []*ssh.Client
+	var via *ssh.Client
+	for i, hop := range hops {
+		client, err := dialHop(ctx, hop, via, hopLabel(i, len(hops)))
+		if err != nil {
+			closeClients(jumps)
+			return nil, nil, err
+		}
+		if i < len(hops)-1 {
+			jumps = append(jumps, client)
+		}
+		via = client
+	}
+	return via, jumps, nil
+}
+
 // dialHop opens one SSH connection: directly, or through via when it is set.
-// label prefixes errors so a failure names its hop.
-func dialHop(config *Config, via *ssh.Client, label string) (*ssh.Client, error) {
+// label prefixes errors so a failure names its hop. Gives up when ctx is done.
+func dialHop(ctx context.Context, config *Config, via *ssh.Client, label string) (*ssh.Client, error) {
 	// Parse private key
 	var signer ssh.Signer
 	var err error
@@ -130,7 +165,6 @@ func dialHop(config *Config, via *ssh.Client, label string) (*ssh.Client, error)
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		Timeout:         30 * time.Second,
 		ClientVersion:   "SSH-2.0-TinglySSH_1.0",
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For simplicity, like JSch's StrictHostKeyChecking=no
 	}
@@ -147,48 +181,62 @@ func dialHop(config *Config, via *ssh.Client, label string) (*ssh.Client, error)
 	}
 
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	if via == nil {
-		client, err := ssh.Dial("tcp", addr, sshConfig)
-		if err != nil {
-			return nil, wrapError(ErrConnectionFailed, fmt.Errorf("%sfailed to connect to %s: %w", label, addr, err))
+	where := addr
+	if via != nil {
+		where += " via jump host"
+	}
+	dctx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	// Distinguishes the caller cancelling from this hop running out of time
+	abort := func(err error) error {
+		if ctx.Err() != nil {
+			return newError(ErrCancelled, "connection cancelled")
 		}
-		return client, nil
+		if dctx.Err() != nil {
+			return newErrorf(ErrTimeout, "%sconnect to %s timed out after %s", label, where, connectTimeout)
+		}
+		return wrapError(ErrConnectionFailed, fmt.Errorf("%sfailed to connect to %s: %w", label, where, err))
 	}
 
-	// Through a jump host: open a direct-tcpip channel and run the SSH handshake over it.
-	// Channel conns have no deadlines, so the timeout is enforced around the whole attempt.
+	// Directly over TCP, or over a direct-tcpip channel through the jump host
+	var conn net.Conn
+	if via == nil {
+		var d net.Dialer
+		conn, err = d.DialContext(dctx, "tcp", addr)
+	} else {
+		conn, err = via.DialContext(dctx, "tcp", addr)
+	}
+	if err != nil {
+		return nil, abort(err)
+	}
+
+	// The handshake doesn't take a context; closing the conn is what interrupts it
 	type result struct {
-		client *ssh.Client
-		err    error
+		cc    ssh.Conn
+		chans <-chan ssh.NewChannel
+		reqs  <-chan *ssh.Request
+		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		conn, err := via.Dial("tcp", addr)
-		if err != nil {
-			done <- result{err: err}
-			return
-		}
 		cc, chans, reqs, err := ssh.NewClientConn(conn, addr, sshConfig)
-		if err != nil {
-			conn.Close()
-			done <- result{err: err}
-			return
-		}
-		done <- result{client: ssh.NewClient(cc, chans, reqs)}
+		done <- result{cc, chans, reqs, err}
 	}()
 	select {
 	case r := <-done:
 		if r.err != nil {
-			return nil, wrapError(ErrConnectionFailed, fmt.Errorf("%sfailed to connect to %s via jump host: %w", label, addr, r.err))
+			conn.Close()
+			return nil, abort(r.err)
 		}
-		return r.client, nil
-	case <-time.After(sshConfig.Timeout):
+		return ssh.NewClient(r.cc, r.chans, r.reqs), nil
+	case <-dctx.Done():
+		conn.Close()
 		go func() {
-			if r := <-done; r.client != nil {
-				r.client.Close()
+			if r := <-done; r.err == nil {
+				r.cc.Close()
 			}
 		}()
-		return nil, newErrorf(ErrTimeout, "%sconnect to %s via jump host timed out after %s", label, addr, sshConfig.Timeout)
+		return nil, abort(dctx.Err())
 	}
 }
 
@@ -319,6 +367,11 @@ func (c *Client) VerifyConnection(config *Config) error {
 func (c *Client) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// Abort a Connect still in progress; it returns ErrCancelled
+	if c.cancelConnect != nil {
+		c.cancelConnect()
+	}
 
 	// Close tunnels first
 	c.closeTunnelsLocked()
